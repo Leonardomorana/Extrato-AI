@@ -31,15 +31,18 @@ export const analyzeBankStatement = async (file: File): Promise<ExtractedData> =
           }
         },
         {
-          // Prompt minimalista para reduzir o processamento de tokens de entrada.
-          // As regras detalhadas foram movidas para as descrições do Schema abaixo.
-          text: `Extrair dados bancários.`
+          // Prompt reduzido ao absoluto necessário. O Schema guia a extração.
+          text: `JSON`
         }
       ]
     },
     config: {
       responseMimeType: "application/json",
-      // Garante resposta imediata sem raciocínio profundo (thinking)
+      // Configurações de amostragem para velocidade máxima (Greedy Decoding)
+      temperature: 0,
+      topP: 0.1,
+      topK: 1,
+      // Desabilita thinking para resposta imediata
       thinkingConfig: { thinkingBudget: 0 },
       responseSchema: {
         type: Type.OBJECT,
@@ -53,16 +56,16 @@ export const analyzeBankStatement = async (file: File): Promise<ExtractedData> =
               properties: {
                 date: { 
                   type: Type.STRING, 
-                  description: "Data da transação em formato ISO 8601 (YYYY-MM-DD)" 
+                  description: "YYYY-MM-DD" 
                 },
                 description: { type: Type.STRING },
                 amount: { 
                   type: Type.NUMBER, 
-                  description: "Valor float. Negativo para saídas/débitos, Positivo para entradas/créditos." 
+                  description: "Float. Negativo=saída." 
                 },
                 category: { 
                   type: Type.STRING, 
-                  description: "Categoria resumida (1-2 palavras)" 
+                  description: "Categoria simples" 
                 }
               },
               required: ["date", "description", "amount", "category"]

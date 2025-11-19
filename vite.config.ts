@@ -2,20 +2,18 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
-  // Carrega variáveis de arquivos .env (local)
-  // O terceiro argumento '' permite carregar variáveis sem prefixo VITE_
+  // Carrega variáveis de ambiente do arquivo .env local (se existir)
+  // O terceiro parâmetro '' diz para carregar tudo, não apenas as que começam com VITE_
   const env = loadEnv(mode, (process as any).cwd(), '');
   
-  // Prioriza a variável do sistema (Vercel) se disponível, senão usa a do arquivo .env
+  // Na Vercel, as variáveis ficam em process.env. Localmente, podem vir de env.
   const apiKey = process.env.API_KEY || env.API_KEY;
 
   return {
     plugins: [react()],
     define: {
-      // Substitui process.env.API_KEY pelo valor real da chave (string) durante o build
-      'process.env.API_KEY': JSON.stringify(apiKey),
-      // Previne erros caso alguma biblioteca tente acessar process.env
-      'process.env': {} 
+      // Injeta o valor da chave como uma string no código do cliente
+      'process.env.API_KEY': JSON.stringify(apiKey)
     }
   };
 });
