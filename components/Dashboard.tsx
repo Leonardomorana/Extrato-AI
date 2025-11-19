@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Transaction, ExtractedData, MonthlyStats, GlobalStats } from '../types';
-import { ArrowUpCircle, ArrowDownCircle, Wallet, Calendar, Search, Filter, Download } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
+import { ExtractedData, MonthlyStats, GlobalStats } from '../types';
+import { ArrowUpCircle, ArrowDownCircle, Wallet, Calendar, Search, Filter } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface DashboardProps {
   data: ExtractedData;

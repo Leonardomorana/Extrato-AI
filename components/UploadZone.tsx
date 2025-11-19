@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { UploadCloud, FileText, Loader2, AlertCircle } from 'lucide-react';
+import { UploadCloud, Loader2, AlertCircle } from 'lucide-react';
 
 interface UploadZoneProps {
   onFileSelect: (file: File) => void;
