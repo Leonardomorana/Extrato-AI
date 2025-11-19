@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react';
-import { ExtractedData, MonthlyStats, GlobalStats } from '../types';
-import { ArrowUpCircle, ArrowDownCircle, Calendar, Search, Filter, ArrowUpDown, Download } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { ExtractedData, MonthlyStats, GlobalStats, Transaction } from '../types';
+import { ArrowUpCircle, Calendar, Search, Filter, Download, Plus, Pencil, Trash2, X, Save } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import html2canvas from 'html2canvas';
 
 interface DashboardProps {
   data: ExtractedData;
@@ -11,36 +12,50 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
+  // Estado local para permitir edição das transações
+  const [localTransactions, setLocalTransactions] = useState<Transaction[]>(data.transactions);
+  
+  // Sincroniza se a prop data mudar (ex: novo upload)
+  useEffect(() => {
+    setLocalTransactions(data.transactions);
+  }, [data]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('Todas');
-  const [typeFilter, setTypeFilter] = useState<string>('all'); // 'all' | 'income' | 'expense'
 
-  // --- Calculations ---
+  // Modal State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null); // null = creating
+  const [formData, setFormData] = useState<Transaction>({
+    date: new Date().toISOString().split('T')[0],
+    description: '',
+    category: 'Geral',
+    amount: 0
+  });
+
+  // --- Calculations based on localTransactions (INCOME ONLY) ---
   const processedData = useMemo(() => {
     const monthlyData: Record<string, MonthlyStats> = {};
     let totalInc = 0;
-    let totalExp = 0;
     
-    const sortedTransactions = [...data.transactions].sort((a, b) => 
+    // Filtrar apenas ENTRADAS (> 0) e ordenar
+    const incomeTransactions = localTransactions.filter(t => t.amount > 0);
+    
+    const sortedData = [...incomeTransactions].sort((a, b) => 
       new Date(b.date).getTime() - new Date(a.date).getTime()
     );
 
-    sortedTransactions.forEach(t => {
+    sortedData.forEach(t => {
       const date = new Date(t.date);
-      // Use UTC to avoid timezone shifts changing the month
+      // Use UTC to avoid timezone shifts
       const monthKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 
       if (!monthlyData[monthKey]) {
         monthlyData[monthKey] = { month: monthKey, income: 0, expense: 0, balance: 0 };
       }
 
-      if (t.amount > 0) {
-        monthlyData[monthKey].income += t.amount;
-        totalInc += t.amount;
-      } else {
-        monthlyData[monthKey].expense += Math.abs(t.amount);
-        totalExp += Math.abs(t.amount);
-      }
+      monthlyData[monthKey].income += t.amount;
+      totalInc += t.amount;
       monthlyData[monthKey].balance += t.amount;
     });
 
@@ -49,36 +64,80 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
 
     const stats: GlobalStats = {
       totalIncome: totalInc,
-      totalExpense: totalExp,
+      totalExpense: 0, // Despesas ignoradas
       averageMonthlyIncome: totalInc / monthCount,
-      averageMonthlyExpense: totalExp / monthCount,
-      netBalance: totalInc - totalExp
+      averageMonthlyExpense: 0,
+      netBalance: totalInc
     };
 
-    return { months, stats, sortedTransactions };
-  }, [data]);
+    return { months, stats, sortedTransactions: sortedData };
+  }, [localTransactions]);
 
   // --- Filtering ---
   const categories = useMemo(() => {
-    const cats = new Set(data.transactions.map(t => t.category));
+    // Categorias baseadas apenas nas transações de entrada
+    const cats = new Set(processedData.sortedTransactions.map(t => t.category));
     return ['Todas', ...Array.from(cats).sort()];
-  }, [data]);
+  }, [processedData.sortedTransactions]);
 
   const filteredTransactions = useMemo(() => {
     return processedData.sortedTransactions.filter(t => {
       const matchesSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesCategory = categoryFilter === 'Todas' || t.category === categoryFilter;
-      
-      let matchesType = true;
-      if (typeFilter === 'income') {
-        matchesType = t.amount > 0;
-      } else if (typeFilter === 'expense') {
-        matchesType = t.amount < 0;
-      }
-
-      return matchesSearch && matchesCategory && matchesType;
+      // Filtro de tipo removido pois só existem entradas agora
+      return matchesSearch && matchesCategory;
     });
-  }, [processedData.sortedTransactions, searchTerm, categoryFilter, typeFilter]);
+  }, [processedData.sortedTransactions, searchTerm, categoryFilter]);
+
+  // --- CRUD Handlers ---
+
+  const handleAddNew = () => {
+    setFormData({
+      date: new Date().toISOString().split('T')[0],
+      description: '',
+      category: 'Geral',
+      amount: 0
+    });
+    setEditingIndex(null);
+    setIsModalOpen(true);
+  };
+
+  const handleEdit = (transaction: Transaction) => {
+    const index = localTransactions.indexOf(transaction);
+    setEditingIndex(index);
+    setFormData({ ...transaction, amount: Math.abs(transaction.amount) });
+    setIsModalOpen(true);
+  };
+
+  const handleDelete = (transaction: Transaction) => {
+    if (confirm('Tem certeza que deseja excluir esta transação?')) {
+      const newTransactions = localTransactions.filter(t => t !== transaction);
+      setLocalTransactions(newTransactions);
+    }
+  };
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Força valor positivo (Receita)
+    const finalAmount = Math.abs(formData.amount);
+
+    const newTransaction: Transaction = {
+      ...formData,
+      amount: finalAmount
+    };
+
+    if (editingIndex !== null && editingIndex >= 0) {
+      // Editando
+      const updated = [...localTransactions];
+      updated[editingIndex] = newTransaction;
+      setLocalTransactions(updated);
+    } else {
+      // Criando
+      setLocalTransactions([newTransaction, ...localTransactions]);
+    }
+    setIsModalOpen(false);
+  };
 
 
   // --- Formatters ---
@@ -91,80 +150,101 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
   };
 
   // --- PDF Export ---
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.width;
 
     // Header
     doc.setFontSize(18);
     doc.setTextColor(40);
-    doc.text('Relatório Financeiro - ExtratoAI Pro', 14, 20);
+    doc.text('Relatório de Receitas - ExtratoAI Pro', 14, 20);
 
-    // Sub Header (Bank Info)
+    // Sub Header
     doc.setFontSize(12);
     doc.setTextColor(100);
     const bankText = data.bankName ? `${data.bankName} ${data.accountHolder ? `| ${data.accountHolder}` : ''}` : 'Extrato Bancário';
     doc.text(bankText, 14, 30);
     doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')}`, 14, 36);
 
-    // Summary Section
-    const totalIncome = filteredTransactions.filter(t => t.amount > 0).reduce((acc, t) => acc + t.amount, 0);
-    const totalExpense = filteredTransactions.filter(t => t.amount < 0).reduce((acc, t) => acc + Math.abs(t.amount), 0);
-    const balance = totalIncome - totalExpense;
+    // Renda Média Line
+    doc.setFontSize(11);
+    doc.setTextColor(70);
+    doc.text(`Renda Média Apurada: ${formatCurrency(processedData.stats.averageMonthlyIncome)}`, 14, 44);
+
+    // Capture Chart
+    let chartImage = null;
+    const chartElement = document.getElementById('monthly-chart');
+    if (chartElement) {
+      try {
+        const canvas = await html2canvas(chartElement, { scale: 2 });
+        chartImage = canvas.toDataURL('image/png');
+      } catch (err) {
+        console.error("Erro ao capturar gráfico", err);
+      }
+    }
+
+    let currentY = 50;
+
+    // Insert Chart if available
+    if (chartImage) {
+      const imgProps = doc.getImageProperties(chartImage);
+      const pdfWidth = pageWidth - 28;
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      doc.addImage(chartImage, 'PNG', 14, currentY, pdfWidth, pdfHeight);
+      currentY += pdfHeight + 10;
+    } else {
+      currentY += 10;
+    }
+
+    // Summary Section (Below Chart)
+    const totalIncome = filteredTransactions.reduce((acc, t) => acc + t.amount, 0);
 
     doc.setDrawColor(200);
-    doc.line(14, 42, pageWidth - 14, 42);
+    doc.line(14, currentY, pageWidth - 14, currentY);
+    currentY += 8;
 
     doc.setFontSize(10);
-    doc.text('Resumo do Período (Filtrado):', 14, 50);
+    doc.setTextColor(40);
+    doc.text('Resumo do Período (Filtrado):', 14, currentY);
+    currentY += 8;
     
     doc.setFontSize(12);
     doc.setTextColor(16, 185, 129); // Emerald Green
-    doc.text(`Receitas: ${formatCurrency(totalIncome)}`, 14, 58);
+    doc.text(`Receitas Totais: ${formatCurrency(totalIncome)}`, 14, currentY);
     
-    doc.setTextColor(244, 63, 94); // Rose Red
-    doc.text(`Despesas: ${formatCurrency(totalExpense)}`, 80, 58);
-    
-    doc.setTextColor(40); // Black/Dark Gray
-    doc.text(`Saldo Líquido: ${formatCurrency(balance)}`, 150, 58);
+    currentY += 10;
 
-    // Table - Separando Entradas e Saídas para melhor visualização
+    // Table
     const tableBody = filteredTransactions.map(t => [
       formatDate(t.date),
       t.description,
       t.category,
-      t.amount < 0 ? formatCurrency(t.amount) : '', // Coluna Saídas
-      t.amount > 0 ? formatCurrency(t.amount) : ''  // Coluna Entradas
+      formatCurrency(t.amount)
     ]);
 
     autoTable(doc, {
-      startY: 65,
-      head: [['Data', 'Descrição', 'Categoria', 'Saídas (-)', 'Entradas (+)']],
+      startY: currentY,
+      head: [['Data', 'Descrição', 'Categoria', 'Valor']],
       body: tableBody,
-      headStyles: { fillColor: [79, 70, 229] }, // Indigo 600
+      headStyles: { fillColor: [16, 185, 129] }, // Emerald Green for Income
       styles: { fontSize: 9 },
       columnStyles: {
         0: { cellWidth: 25 },
         1: { cellWidth: 'auto' },
-        2: { cellWidth: 30 },
-        3: { cellWidth: 30, halign: 'right' }, // Saídas
-        4: { cellWidth: 30, halign: 'right' }, // Entradas
+        2: { cellWidth: 40 },
+        3: { cellWidth: 40, halign: 'right' },
       },
       didParseCell: (data) => {
         if (data.section === 'body') {
-            // Estilo para coluna de Saídas (Index 3)
             if (data.column.index === 3 && data.cell.raw) {
-                data.cell.styles.textColor = [220, 38, 38]; // Red
-            }
-            // Estilo para coluna de Entradas (Index 4)
-            if (data.column.index === 4 && data.cell.raw) {
-                data.cell.styles.textColor = [22, 163, 74]; // Green
+                data.cell.styles.textColor = [22, 163, 74]; // Green text
             }
         }
       }
     });
 
-    doc.save('relatorio_extrato_ai.pdf');
+    doc.save('relatorio_receitas_ai.pdf');
   };
 
   return (
@@ -173,10 +253,17 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
       {/* Header Info */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Resumo do Extrato</h2>
+          <h2 className="text-2xl font-bold text-slate-800">Resumo de Receitas</h2>
           {data.bankName && <p className="text-slate-500 text-sm font-medium mt-1">{data.bankName} • {data.accountHolder}</p>}
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 flex-wrap">
+            <button 
+              onClick={handleAddNew}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+            >
+                <Plus className="w-4 h-4" />
+                Nova Entrada
+            </button>
             <button 
               onClick={handleExportPDF}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm"
@@ -190,8 +277,8 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* KPI Cards - REMOVED EXPENSES */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <StatsCard 
           title="Média Mensal (Receita)" 
           value={processedData.stats.averageMonthlyIncome} 
@@ -199,14 +286,6 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
           trend="Baseado no histórico"
           colorClass="text-emerald-600"
         />
-         <StatsCard 
-          title="Média Mensal (Despesas)" 
-          value={processedData.stats.averageMonthlyExpense} 
-          icon={<ArrowDownCircle className="w-5 h-5 text-rose-500" />}
-          trend="Baseado no histórico"
-          colorClass="text-rose-600"
-        />
-        {/* Removed Total Balance Card as requested previously, maintaining layout */}
          <StatsCard 
           title="Período Analisado" 
           value={`${processedData.months.length} Meses`} 
@@ -217,8 +296,8 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
         />
       </div>
 
-      {/* Chart Section */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+      {/* Chart Section - Only Income */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100" id="monthly-chart">
         <h3 className="text-lg font-semibold text-slate-800 mb-6">Fluxo Mensal (Entradas)</h3>
         <div className="h-[350px] w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -243,10 +322,10 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
         </div>
       </div>
 
-      {/* Transactions Table */}
+      {/* Transactions Table - Income Only */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
         <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row gap-4 md:items-center justify-between">
-            <h3 className="text-lg font-semibold text-slate-800">Detalhamento das Transações</h3>
+            <h3 className="text-lg font-semibold text-slate-800">Detalhamento das Entradas</h3>
             
             <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
                 {/* Search Input */}
@@ -259,20 +338,6 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-48"
                     />
-                </div>
-
-                {/* Type Filter (In/Out) */}
-                <div className="relative flex-grow sm:flex-grow-0">
-                    <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <select 
-                        value={typeFilter}
-                        onChange={(e) => setTypeFilter(e.target.value)}
-                        className="pl-10 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 appearance-none w-full sm:w-40 cursor-pointer"
-                    >
-                        <option value="all">Tudo</option>
-                        <option value="income">Entradas</option>
-                        <option value="expense">Saídas</option>
-                    </select>
                 </div>
 
                 {/* Category Filter */}
@@ -299,6 +364,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
                 <th className="px-6 py-3">Descrição</th>
                 <th className="px-6 py-3">Categoria</th>
                 <th className="px-6 py-3 text-right">Valor</th>
+                <th className="px-6 py-3 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -311,15 +377,25 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
                         {t.category}
                     </span>
                   </td>
-                  <td className={`px-6 py-4 text-right font-semibold ${t.amount >= 0 ? 'text-emerald-600' : 'text-slate-700'}`}>
+                  <td className="px-6 py-4 text-right font-semibold text-emerald-600">
                     {formatCurrency(t.amount)}
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => handleEdit(t)} className="p-1 text-slate-400 hover:text-indigo-600 transition-colors" title="Editar">
+                            <Pencil className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleDelete(t)} className="p-1 text-slate-400 hover:text-red-600 transition-colors" title="Excluir">
+                            <Trash2 className="w-4 h-4" />
+                        </button>
+                    </div>
                   </td>
                 </tr>
               ))}
               {filteredTransactions.length === 0 && (
                   <tr>
-                      <td colSpan={4} className="px-6 py-12 text-center text-slate-400">
-                          Nenhuma transação encontrada com os filtros atuais.
+                      <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
+                          Nenhuma transação de entrada encontrada.
                       </td>
                   </tr>
               )}
@@ -327,6 +403,94 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
           </table>
         </div>
       </div>
+
+      {/* Edit/Add Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                    <h3 className="text-lg font-semibold text-slate-800">
+                        {editingIndex !== null ? 'Editar Entrada' : 'Nova Entrada'}
+                    </h3>
+                    <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+                
+                <form onSubmit={handleSave} className="p-6 space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Descrição</label>
+                        <input 
+                            type="text" 
+                            required
+                            value={formData.description}
+                            onChange={(e) => setFormData({...formData, description: e.target.value})}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder="Ex: Salário"
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Data</label>
+                            <input 
+                                type="date" 
+                                required
+                                value={formData.date}
+                                onChange={(e) => setFormData({...formData, date: e.target.value})}
+                                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                        </div>
+                         <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Categoria</label>
+                            <input 
+                                type="text" 
+                                required
+                                value={formData.category}
+                                onChange={(e) => setFormData({...formData, category: e.target.value})}
+                                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                list="category-list"
+                            />
+                            <datalist id="category-list">
+                                {categories.filter(c => c !== 'Todas').map(c => <option key={c} value={c} />)}
+                            </datalist>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Valor (R$)</label>
+                        <input 
+                            type="number" 
+                            step="0.01"
+                            min="0"
+                            required
+                            value={formData.amount}
+                            onChange={(e) => setFormData({...formData, amount: parseFloat(e.target.value)})}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                    </div>
+
+                    <div className="pt-4 flex gap-3">
+                        <button 
+                            type="button" 
+                            onClick={() => setIsModalOpen(false)}
+                            className="flex-1 px-4 py-2 text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg font-medium"
+                        >
+                            Cancelar
+                        </button>
+                        <button 
+                            type="submit"
+                            className="flex-1 px-4 py-2 text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg font-medium flex items-center justify-center gap-2"
+                        >
+                            <Save className="w-4 h-4" />
+                            Salvar
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
     </div>
   );
 };
