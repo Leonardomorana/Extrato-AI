@@ -1,8 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ExtractedData } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -18,6 +16,8 @@ const fileToBase64 = (file: File): Promise<string> => {
 };
 
 export const analyzeBankStatement = async (file: File): Promise<ExtractedData> => {
+  // Inicialização ajustada para usar diretamente process.env.API_KEY conforme diretrizes
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const base64Data = await fileToBase64(file);
 
   const response = await ai.models.generateContent({
