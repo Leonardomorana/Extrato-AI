@@ -11,7 +11,11 @@
         font-family: 'Inter', sans-serif;
       }
     </style>
-  <script type="importmap">
+    <script>
+      // Polyfill de segurança para evitar ReferenceError: process is not defined
+      window.process = window.process || { env: {} };
+    </script>
+<script type="importmap">
 {
   "imports": {
     "react": "https://aistudiocdn.com/react@^19.2.0",
