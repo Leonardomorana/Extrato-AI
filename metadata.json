@@ -1,0 +1,5 @@
+{
+  "name": "ExtratoAI Pro",
+  "description": "Leitor inteligente de extratos bancários em PDF que extrai transações, categoriza gastos e calcula médias mensais utilizando IA.",
+  "requestFramePermissions": []
+}
