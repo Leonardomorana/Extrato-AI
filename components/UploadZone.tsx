@@ -1,8 +1,8 @@
 import React, { useCallback, useState } from 'react';
-import { UploadCloud, Loader2, AlertCircle } from 'lucide-react';
+import { UploadCloud, Loader2, AlertCircle, FileStack } from 'lucide-react';
 
 interface UploadZoneProps {
-  onFileSelect: (file: File) => void;
+  onFileSelect: (files: File[]) => void;
   isProcessing: boolean;
   error: string | null;
 }
@@ -24,10 +24,13 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onFileSelect, isProcessing, err
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      if (file.type === "application/pdf") {
-        onFileSelect(file);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files: File[] = Array.from(e.dataTransfer.files);
+      const pdfFiles = files.filter(f => f.type === "application/pdf");
+      
+      if (pdfFiles.length > 0) {
+        onFileSelect(pdfFiles);
       } else {
         alert("Por favor, envie apenas arquivos PDF.");
       }
@@ -36,8 +39,12 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onFileSelect, isProcessing, err
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
-    if (e.target.files && e.target.files[0]) {
-      onFileSelect(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      const files: File[] = Array.from(e.target.files);
+      const pdfFiles = files.filter(f => f.type === "application/pdf");
+      if (pdfFiles.length > 0) {
+        onFileSelect(pdfFiles);
+      }
     }
   };
 
@@ -58,6 +65,7 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onFileSelect, isProcessing, err
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
           onChange={handleChange}
           accept="application/pdf"
+          multiple // Permite múltiplos arquivos
           disabled={isProcessing}
         />
 
@@ -65,19 +73,23 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onFileSelect, isProcessing, err
           {isProcessing ? (
             <>
               <Loader2 className="w-12 h-12 text-indigo-600 animate-spin mb-4" />
-              <p className="text-lg font-medium text-slate-700">Processando seu extrato...</p>
-              <p className="text-sm text-slate-500 mt-2">A IA está lendo e categorizando suas transações.</p>
+              <p className="text-lg font-medium text-slate-700">Processando seus extratos...</p>
+              <p className="text-sm text-slate-500 mt-2">A IA está unificando e analisando as transações.</p>
             </>
           ) : (
             <>
               <div className={`p-4 rounded-full mb-4 ${dragActive ? 'bg-indigo-200' : 'bg-slate-100'}`}>
-                <UploadCloud className={`w-10 h-10 ${dragActive ? 'text-indigo-700' : 'text-slate-400'}`} />
+                {dragActive ? (
+                   <UploadCloud className="w-10 h-10 text-indigo-700" />
+                ) : (
+                   <FileStack className="w-10 h-10 text-slate-400" />
+                )}
               </div>
               <p className="mb-2 text-lg text-slate-700 font-semibold">
-                Arraste seu PDF aqui ou clique para selecionar
+                Arraste seus PDFs aqui ou clique para selecionar
               </p>
               <p className="text-sm text-slate-500">
-                Suporta extratos bancários em formato PDF (NuBank, Inter, Itaú, BB, etc.)
+                Você pode enviar um ou múltiplos extratos simultaneamente.
               </p>
             </>
           )}
