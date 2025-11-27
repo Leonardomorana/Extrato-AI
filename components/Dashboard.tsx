@@ -1,20 +1,20 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { ExtractedData, MonthlyStats, GlobalStats, Transaction } from '../types';
-import { ArrowUpCircle, Calendar, Search, Filter, Download, Plus, Pencil, Trash2, X, Save } from 'lucide-react';
+import { ArrowUpCircle, Calendar, Search, Filter, Download, Plus, Pencil, Trash2, X, Save, Settings, RotateCcw } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
 
-// Lista de termos para exclusão automática (Jogos Online e Recebimentos de Clientes)
-const IGNORED_TERMS = [
+// Lista padrão de termos para exclusão automática
+const DEFAULT_IGNORED_TERMS = [
   // Jogos e Apostas
   'bet', 'bet365', 'blaze', 'sportingbet', 'pagsmile', 'cassino', 'casino', 
   'aposta', 'jogo', 'play', 'steam', 'google play', 'apple.com/bill', 
   'stake', 'tigrinho', 'pagseguro internet', 'adyen', 'smartpay',
   
   // Clientes / Vendas / Próprios (Conforme solicitado)
-  'cliente', 'recebimento de venda', 'venda', 'pagamento de cliente'
+  'recebimento de venda', 'venda', 'pagamento de cliente'
 ];
 
 interface DashboardProps {
@@ -26,6 +26,9 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
   // Estado local para permitir edição das transações
   const [localTransactions, setLocalTransactions] = useState<Transaction[]>(data.transactions);
   
+  // Estado para os termos ignorados (Filtro Editável)
+  const [ignoredTerms, setIgnoredTerms] = useState<string[]>(DEFAULT_IGNORED_TERMS);
+  
   // Sincroniza se a prop data mudar (ex: novo upload)
   useEffect(() => {
     setLocalTransactions(data.transactions);
@@ -34,8 +37,9 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('Todas');
 
-  // Modal State
+  // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null); // null = creating
   const [formData, setFormData] = useState<Transaction>({
     date: new Date().toISOString().split('T')[0],
@@ -43,6 +47,9 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
     category: 'Geral',
     amount: 0
   });
+  
+  // Estado para adicionar novo termo no modal de configurações
+  const [newFilterTerm, setNewFilterTerm] = useState('');
 
   // --- Calculations based on localTransactions (INCOME ONLY & FILTERED) ---
   const processedData = useMemo(() => {
@@ -50,13 +57,13 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
     let totalInc = 0;
     
     // 1. Filtrar apenas ENTRADAS (> 0)
-    // 2. Excluir termos proibidos (Jogos, Clientes)
+    // 2. Excluir termos proibidos (Jogos, Clientes) baseados no estado ignoredTerms
     const incomeTransactions = localTransactions.filter(t => {
       if (t.amount <= 0) return false;
 
       const desc = t.description.toLowerCase();
-      // Verifica se a descrição contém algum termo proibido
-      const isIgnored = IGNORED_TERMS.some(term => desc.includes(term));
+      // Verifica se a descrição contém algum termo proibido da lista dinâmica
+      const isIgnored = ignoredTerms.some(term => desc.includes(term.toLowerCase()));
       
       return !isIgnored;
     });
@@ -91,7 +98,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
     };
 
     return { months, stats, sortedTransactions: sortedData };
-  }, [localTransactions]);
+  }, [localTransactions, ignoredTerms]);
 
   // --- Filtering ---
   const categories = useMemo(() => {
@@ -157,6 +164,25 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
       setLocalTransactions([newTransaction, ...localTransactions]);
     }
     setIsModalOpen(false);
+  };
+
+  // --- Filter Settings Handlers ---
+  const handleAddFilterTerm = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newFilterTerm && !ignoredTerms.includes(newFilterTerm.toLowerCase())) {
+        setIgnoredTerms([...ignoredTerms, newFilterTerm.toLowerCase()]);
+        setNewFilterTerm('');
+    }
+  };
+
+  const handleRemoveFilterTerm = (termToRemove: string) => {
+      setIgnoredTerms(ignoredTerms.filter(t => t !== termToRemove));
+  };
+
+  const handleResetFilters = () => {
+      if(confirm('Isso restaurará a lista padrão de termos ignorados. Continuar?')) {
+          setIgnoredTerms(DEFAULT_IGNORED_TERMS);
+      }
   };
 
 
@@ -226,7 +252,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
 
     doc.setFontSize(10);
     doc.setTextColor(40);
-    doc.text('Resumo do Período (Filtrado - Exceto Jogos/Clientes):', 14, currentY);
+    doc.text('Resumo do Período (Filtrado):', 14, currentY);
     currentY += 8;
     
     doc.setFontSize(12);
@@ -275,9 +301,18 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Resumo de Receitas</h2>
           {data.bankName && <p className="text-slate-500 text-sm font-medium mt-1">{data.bankName} • {data.accountHolder}</p>}
-          <p className="text-xs text-orange-600 mt-2 bg-orange-50 inline-block px-2 py-1 rounded-md border border-orange-100">
-            Filtro Ativo: Jogos Online e Clientes ignorados
-          </p>
+          <div className="flex items-center gap-2 mt-2">
+            <p className="text-xs text-orange-600 bg-orange-50 inline-block px-2 py-1 rounded-md border border-orange-100">
+                Filtro Ativo: {ignoredTerms.length} termos ignorados
+            </p>
+            <button 
+                onClick={() => setIsSettingsOpen(true)}
+                className="text-slate-400 hover:text-indigo-600 transition-colors"
+                title="Configurar Filtros"
+            >
+                <Settings className="w-4 h-4" />
+            </button>
+          </div>
         </div>
         <div className="flex gap-3 flex-wrap">
             <button 
@@ -427,7 +462,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
         </div>
       </div>
 
-      {/* Edit/Add Modal */}
+      {/* Transaction Edit/Add Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
@@ -512,6 +547,83 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
                 </form>
             </div>
         </div>
+      )}
+
+      {/* Filter Settings Modal */}
+      {isSettingsOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
+                  <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                      <div className="flex items-center gap-2">
+                          <Settings className="w-5 h-5 text-slate-500" />
+                          <h3 className="text-lg font-semibold text-slate-800">
+                              Configurar Termos Ignorados
+                          </h3>
+                      </div>
+                      <button onClick={() => setIsSettingsOpen(false)} className="text-slate-400 hover:text-slate-600">
+                          <X className="w-5 h-5" />
+                      </button>
+                  </div>
+                  
+                  <div className="p-6">
+                      <p className="text-sm text-slate-500 mb-4">
+                          Transações que contenham qualquer um dos termos abaixo na descrição serão automaticamente <strong>excluídas</strong> do cálculo de renda média e da lista.
+                      </p>
+
+                      <form onSubmit={handleAddFilterTerm} className="flex gap-2 mb-6">
+                          <input 
+                              type="text" 
+                              value={newFilterTerm}
+                              onChange={(e) => setNewFilterTerm(e.target.value)}
+                              placeholder="Adicionar novo termo (ex: pix enviado)"
+                              className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                          />
+                          <button 
+                              type="submit"
+                              disabled={!newFilterTerm}
+                              className="px-4 py-2 text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm font-medium"
+                          >
+                              Adicionar
+                          </button>
+                      </form>
+
+                      <div className="max-h-60 overflow-y-auto mb-4 border border-slate-100 rounded-lg p-2 bg-slate-50">
+                          <div className="flex flex-wrap gap-2">
+                              {ignoredTerms.map((term, idx) => (
+                                  <span key={idx} className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-white border border-slate-200 text-slate-700 shadow-sm">
+                                      {term}
+                                      <button 
+                                          onClick={() => handleRemoveFilterTerm(term)}
+                                          className="text-slate-400 hover:text-red-500 ml-1"
+                                      >
+                                          <X className="w-3 h-3" />
+                                      </button>
+                                  </span>
+                              ))}
+                              {ignoredTerms.length === 0 && (
+                                  <p className="text-xs text-slate-400 p-2 italic w-full text-center">Nenhum termo sendo ignorado no momento.</p>
+                              )}
+                          </div>
+                      </div>
+
+                      <div className="flex justify-between items-center pt-2 border-t border-slate-100 mt-4">
+                          <button 
+                              onClick={handleResetFilters}
+                              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-indigo-600 transition-colors"
+                          >
+                              <RotateCcw className="w-3 h-3" />
+                              Restaurar Padrão
+                          </button>
+                          <button 
+                              onClick={() => setIsSettingsOpen(false)}
+                              className="px-4 py-2 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg font-medium text-sm"
+                          >
+                              Concluir
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          </div>
       )}
 
     </div>
