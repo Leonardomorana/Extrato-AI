@@ -6,6 +6,17 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
 
+// Lista de termos para exclusão automática (Jogos Online e Recebimentos de Clientes)
+const IGNORED_TERMS = [
+  // Jogos e Apostas
+  'bet', 'bet365', 'blaze', 'sportingbet', 'pagsmile', 'cassino', 'casino', 
+  'aposta', 'jogo', 'play', 'steam', 'google play', 'apple.com/bill', 
+  'stake', 'tigrinho', 'pagseguro internet', 'adyen', 'smartpay',
+  
+  // Clientes / Vendas / Próprios (Conforme solicitado)
+  'cliente', 'recebimento de venda', 'venda', 'pagamento de cliente'
+];
+
 interface DashboardProps {
   data: ExtractedData;
   onReset: () => void;
@@ -33,13 +44,22 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
     amount: 0
   });
 
-  // --- Calculations based on localTransactions (INCOME ONLY) ---
+  // --- Calculations based on localTransactions (INCOME ONLY & FILTERED) ---
   const processedData = useMemo(() => {
     const monthlyData: Record<string, MonthlyStats> = {};
     let totalInc = 0;
     
-    // Filtrar apenas ENTRADAS (> 0) e ordenar
-    const incomeTransactions = localTransactions.filter(t => t.amount > 0);
+    // 1. Filtrar apenas ENTRADAS (> 0)
+    // 2. Excluir termos proibidos (Jogos, Clientes)
+    const incomeTransactions = localTransactions.filter(t => {
+      if (t.amount <= 0) return false;
+
+      const desc = t.description.toLowerCase();
+      // Verifica se a descrição contém algum termo proibido
+      const isIgnored = IGNORED_TERMS.some(term => desc.includes(term));
+      
+      return !isIgnored;
+    });
     
     const sortedData = [...incomeTransactions].sort((a, b) => 
       new Date(b.date).getTime() - new Date(a.date).getTime()
@@ -75,7 +95,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
 
   // --- Filtering ---
   const categories = useMemo(() => {
-    // Categorias baseadas apenas nas transações de entrada
+    // Categorias baseadas apenas nas transações de entrada filtradas
     const cats = new Set(processedData.sortedTransactions.map(t => t.category));
     return ['Todas', ...Array.from(cats).sort()];
   }, [processedData.sortedTransactions]);
@@ -206,7 +226,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
 
     doc.setFontSize(10);
     doc.setTextColor(40);
-    doc.text('Resumo do Período (Filtrado):', 14, currentY);
+    doc.text('Resumo do Período (Filtrado - Exceto Jogos/Clientes):', 14, currentY);
     currentY += 8;
     
     doc.setFontSize(12);
@@ -255,6 +275,9 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Resumo de Receitas</h2>
           {data.bankName && <p className="text-slate-500 text-sm font-medium mt-1">{data.bankName} • {data.accountHolder}</p>}
+          <p className="text-xs text-orange-600 mt-2 bg-orange-50 inline-block px-2 py-1 rounded-md border border-orange-100">
+            Filtro Ativo: Jogos Online e Clientes ignorados
+          </p>
         </div>
         <div className="flex gap-3 flex-wrap">
             <button 
@@ -283,7 +306,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
           title="Média Mensal (Receita)" 
           value={processedData.stats.averageMonthlyIncome} 
           icon={<ArrowUpCircle className="w-5 h-5 text-emerald-500" />}
-          trend="Baseado no histórico"
+          trend="Baseado no histórico filtrado"
           colorClass="text-emerald-600"
         />
          <StatsCard 
@@ -298,7 +321,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
 
       {/* Chart Section - Only Income */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100" id="monthly-chart">
-        <h3 className="text-lg font-semibold text-slate-800 mb-6">Fluxo Mensal (Entradas)</h3>
+        <h3 className="text-lg font-semibold text-slate-800 mb-6">Fluxo Mensal (Entradas Filtradas)</h3>
         <div className="h-[350px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={processedData.months} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -395,7 +418,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
               {filteredTransactions.length === 0 && (
                   <tr>
                       <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
-                          Nenhuma transação de entrada encontrada.
+                          Nenhuma transação de entrada encontrada (filtros aplicados).
                       </td>
                   </tr>
               )}
