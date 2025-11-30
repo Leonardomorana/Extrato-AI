@@ -31,7 +31,7 @@ export const analyzeBankStatement = async (file: File): Promise<ExtractedData> =
           }
         },
         {
-          // Prompt reduzido ao absoluto necessário. O Schema guia a extração.
+          // Prompt minimalista. A mágica acontece no Schema minificado abaixo.
           text: `JSON`
         }
       ]
@@ -47,32 +47,32 @@ export const analyzeBankStatement = async (file: File): Promise<ExtractedData> =
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          bankName: { type: Type.STRING, nullable: true },
-          accountHolder: { type: Type.STRING, nullable: true },
-          transactions: {
+          b: { type: Type.STRING, nullable: true }, // Bank Name (Minified)
+          h: { type: Type.STRING, nullable: true }, // Account Holder (Minified)
+          tx: { // Transactions (Minified)
             type: Type.ARRAY,
             items: {
               type: Type.OBJECT,
               properties: {
-                date: { 
+                d: { 
                   type: Type.STRING, 
                   description: "YYYY-MM-DD" 
-                },
-                description: { type: Type.STRING },
-                amount: { 
+                }, // Date
+                t: { type: Type.STRING }, // Text/Description
+                v: { 
                   type: Type.NUMBER, 
                   description: "Float. Negativo=saída." 
-                },
-                category: { 
+                }, // Value/Amount
+                c: { 
                   type: Type.STRING, 
                   description: "Categoria simples" 
-                }
+                } // Category
               },
-              required: ["date", "description", "amount", "category"]
+              required: ["d", "t", "v", "c"]
             }
           }
         },
-        required: ["transactions"]
+        required: ["tx"]
       }
     }
   });
@@ -82,7 +82,20 @@ export const analyzeBankStatement = async (file: File): Promise<ExtractedData> =
   }
 
   try {
-    const data = JSON.parse(response.text) as ExtractedData;
+    const raw = JSON.parse(response.text);
+    
+    // Mapeia o JSON minificado de volta para a estrutura robusta da aplicação
+    const data: ExtractedData = {
+        bankName: raw.b,
+        accountHolder: raw.h,
+        transactions: raw.tx.map((item: any) => ({
+            date: item.d,
+            description: item.t,
+            amount: item.v,
+            category: item.c
+        }))
+    };
+
     return data;
   } catch (e) {
     console.error("Failed to parse JSON", e);
