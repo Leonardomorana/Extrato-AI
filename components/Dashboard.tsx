@@ -14,7 +14,7 @@ const DEFAULT_IGNORED_TERMS = [
   'stake', 'tigrinho', 'pagseguro internet', 'adyen', 'smartpay',
   
   // Clientes / Vendas / Próprios (Conforme solicitado)
-  'recebimento de venda', 'venda', 'pagamento de cliente'
+  'recebimento de venda', 'venda'
 ];
 
 interface DashboardProps {
