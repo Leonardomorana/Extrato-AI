@@ -136,7 +136,7 @@ export const analyzeBankStatement = async (file: File): Promise<ExtractedData> =
     const results = await Promise.all(chunkPromises);
 
     // Merge results
-    results.forEach((data, index) => {
+    results.forEach((data) => {
         if (data.tx && Array.isArray(data.tx)) {
             const mappedTransactions = data.tx.map((item: any) => ({
                 date: item.d,
