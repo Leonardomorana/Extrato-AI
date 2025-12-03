@@ -95,6 +95,10 @@ const processPdfChunk = async (base64Chunk: string, ai: GoogleGenAI): Promise<an
 };
 
 export const analyzeBankStatement = async (file: File): Promise<ExtractedData> => {
+  if (!process.env.API_KEY) {
+    throw new Error("Chave de API não configurada. Por favor, adicione a variável de ambiente API_KEY nas configurações do Vercel.");
+  }
+
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
@@ -158,8 +162,10 @@ export const analyzeBankStatement = async (file: File): Promise<ExtractedData> =
         transactions: allTransactions
     };
 
-  } catch (e) {
+  } catch (e: any) {
     console.error("Erro na análise do extrato:", e);
-    throw new Error("Falha ao processar o arquivo. Verifique se é um PDF válido e tente novamente.");
+    // Repassa a mensagem de erro se for específica (ex: chave api), senão genérica
+    const message = e.message || "Falha ao processar o arquivo. Verifique se é um PDF válido e tente novamente.";
+    throw new Error(message);
   }
 };

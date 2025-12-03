@@ -8,8 +8,8 @@ export default defineConfig(({ mode }) => {
   // Prioridade: 
   // 1. Vercel System Env (process.env.API_KEY)
   // 2. Arquivo .env local (env.API_KEY)
-  // A chave hardcoded foi removida por segurança.
-  const apiKey = process.env.API_KEY || env.API_KEY;
+  // Default para string vazia para não quebrar o JSON.stringify se undefined
+  const apiKey = process.env.API_KEY || env.API_KEY || '';
 
   return {
     plugins: [react()],
