@@ -13,6 +13,12 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    build: {
+      target: 'esnext'
+    },
+    esbuild: {
+      target: 'esnext'
+    },
     define: {
       // Injeta o valor da chave como uma string no código do cliente
       'process.env.API_KEY': JSON.stringify(apiKey)

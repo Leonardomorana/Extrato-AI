@@ -1,25 +1,23 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { ExtractedData } from "../types";
+import { PDFDocument } from "pdf-lib";
+import { ExtractedData, Transaction } from "../types";
 
-const fileToBase64 = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => {
-      const result = reader.result as string;
-      // Remove the Data URL prefix (e.g., "data:application/pdf;base64,")
-      const base64 = result.split(',')[1];
-      resolve(base64);
-    };
-    reader.onerror = (error) => reject(error);
-  });
+// Reduced to 3 pages per chunk to prevent output token limit truncation (JSON parse errors)
+const PAGES_PER_CHUNK = 3;
+
+const cleanJsonResponse = (text: string): string => {
+  let cleaned = text.trim();
+  // Remove markdown code blocks common in LLM responses
+  if (cleaned.startsWith('```json')) {
+    cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+  } else if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+  }
+  return cleaned;
 };
 
-export const analyzeBankStatement = async (file: File): Promise<ExtractedData> => {
-  // Inicialização ajustada para usar diretamente process.env.API_KEY conforme diretrizes
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const base64Data = await fileToBase64(file);
-
+// Helper to extract text from a specific PDF chunk
+const processPdfChunk = async (base64Chunk: string, ai: GoogleGenAI): Promise<any> => {
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: {
@@ -27,46 +25,57 @@ export const analyzeBankStatement = async (file: File): Promise<ExtractedData> =
         {
           inlineData: {
             mimeType: 'application/pdf',
-            data: base64Data
+            data: base64Chunk
           }
         },
         {
-          // Prompt minimalista. A mágica acontece no Schema minificado abaixo.
-          text: `JSON`
+          text: `Extract transactions.`
         }
       ]
     },
     config: {
+      // Instrução otimizada para velocidade e precisão em formatos BR (PagBank, Uber, Digio, etc)
+      systemInstruction: `You are an expert JSON extractor for Brazilian bank statements.
+      Target Banks: PagBank, Uber Conta, Digio, Nubank, Inter, Itaú, Bradesco.
+      
+      Output STRICT JSON. No markdown.
+      Dates: YYYY-MM-DD.
+      Values: Float (use '.' for decimal).
+      
+      CRITICAL RULES FOR VALUES:
+      1. Detect sign based on context and columns.
+      2. NEGATIVE (Expense): 
+         - Words in description/type: 'Débito', 'Saída', 'Envio', 'Pagamento', 'Compra', 'Tarifa', 'Retirada', 'Pix Enviado'.
+         - Symbols: '-' before 'R$' or before number.
+         - Columns labeled 'Débito' or 'Saída'.
+      3. POSITIVE (Income): 
+         - Words in description/type: 'Crédito', 'Entrada', 'Recebimento', 'Estorno', 'Depósito', 'Transferência recebida', 'Pix Recebido', 'Ganhos'.
+      4. IGNORE: 'Saldo', 'Total', 'Subtotal', 'A aplicar', 'Saldo Anterior'.
+      5. PagBank/Digital Banks Specific: 'Envio de Pix' is Negative. 'Recebimento de Pix' is Positive.
+      
+      Schema Keys: 
+      b=bank_name (string), 
+      h=holder_name (string), 
+      tx=transactions (array of objects: d=date, t=desc, v=val, c=cat).`,
       responseMimeType: "application/json",
-      // Configurações de amostragem para velocidade máxima (Greedy Decoding)
       temperature: 0,
       topP: 0.1,
       topK: 1,
-      // Desabilita thinking para resposta imediata
       thinkingConfig: { thinkingBudget: 0 },
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          b: { type: Type.STRING, nullable: true }, // Bank Name (Minified)
-          h: { type: Type.STRING, nullable: true }, // Account Holder (Minified)
-          tx: { // Transactions (Minified)
+          b: { type: Type.STRING, nullable: true },
+          h: { type: Type.STRING, nullable: true },
+          tx: {
             type: Type.ARRAY,
             items: {
               type: Type.OBJECT,
               properties: {
-                d: { 
-                  type: Type.STRING, 
-                  description: "YYYY-MM-DD" 
-                }, // Date
-                t: { type: Type.STRING }, // Text/Description
-                v: { 
-                  type: Type.NUMBER, 
-                  description: "Float. Negativo=saída." 
-                }, // Value/Amount
-                c: { 
-                  type: Type.STRING, 
-                  description: "Categoria simples" 
-                } // Category
+                d: { type: Type.STRING, description: "Date YYYY-MM-DD" },
+                t: { type: Type.STRING, description: "Description" },
+                v: { type: Type.NUMBER, description: "Value. Negative for expenses." },
+                c: { type: Type.STRING, description: "Category (e.g. Pix, Boleto, Taxa)" }
               },
               required: ["d", "t", "v", "c"]
             }
@@ -78,27 +87,79 @@ export const analyzeBankStatement = async (file: File): Promise<ExtractedData> =
   });
 
   if (!response.text) {
-    throw new Error("Não foi possível extrair dados do PDF.");
+    throw new Error("Empty response from AI");
   }
 
+  const cleanedText = cleanJsonResponse(response.text);
+  return JSON.parse(cleanedText);
+};
+
+export const analyzeBankStatement = async (file: File): Promise<ExtractedData> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
   try {
-    const raw = JSON.parse(response.text);
+    const arrayBuffer = await file.arrayBuffer();
+    const pdfDoc = await PDFDocument.load(arrayBuffer);
+    const totalPages = pdfDoc.getPageCount();
     
-    // Mapeia o JSON minificado de volta para a estrutura robusta da aplicação
-    const data: ExtractedData = {
-        bankName: raw.b,
-        accountHolder: raw.h,
-        transactions: raw.tx.map((item: any) => ({
-            date: item.d,
-            description: item.t,
-            amount: item.v,
-            category: item.c
-        }))
+    let allTransactions: Transaction[] = [];
+    let bankName = "";
+    let accountHolder = "";
+
+    // Determine chunks
+    const chunkPromises = [];
+    
+    // If file is small, process as one. If large, split.
+    if (totalPages <= PAGES_PER_CHUNK) {
+       // Single chunk processing (optimization for small files)
+       const base64 = await pdfDoc.saveAsBase64();
+       chunkPromises.push(processPdfChunk(base64, ai));
+    } else {
+       // Split into chunks
+       for (let i = 0; i < totalPages; i += PAGES_PER_CHUNK) {
+         const subDoc = await PDFDocument.create();
+         const pageIndices = [];
+         // Calculate pages for this chunk
+         for (let j = 0; j < PAGES_PER_CHUNK && (i + j) < totalPages; j++) {
+           pageIndices.push(i + j);
+         }
+         
+         const copiedPages = await subDoc.copyPages(pdfDoc, pageIndices);
+         copiedPages.forEach(page => subDoc.addPage(page));
+         
+         const base64Chunk = await subDoc.saveAsBase64();
+         chunkPromises.push(processPdfChunk(base64Chunk, ai));
+       }
+    }
+
+    // Process all chunks in parallel
+    const results = await Promise.all(chunkPromises);
+
+    // Merge results
+    results.forEach((data, index) => {
+        if (data.tx && Array.isArray(data.tx)) {
+            const mappedTransactions = data.tx.map((item: any) => ({
+                date: item.d,
+                description: item.t,
+                amount: item.v,
+                category: item.c
+            }));
+            allTransactions = [...allTransactions, ...mappedTransactions];
+        }
+        
+        // Capture metadata from the first chunk that has it
+        if (!bankName && data.b) bankName = data.b;
+        if (!accountHolder && data.h) accountHolder = data.h;
+    });
+
+    return {
+        bankName: bankName || "Banco não identificado",
+        accountHolder: accountHolder || "Titular não identificado",
+        transactions: allTransactions
     };
 
-    return data;
   } catch (e) {
-    console.error("Failed to parse JSON", e);
-    throw new Error("Erro ao processar a resposta da IA.");
+    console.error("Erro na análise do extrato:", e);
+    throw new Error("Falha ao processar o arquivo. Verifique se é um PDF válido e tente novamente.");
   }
 };
