@@ -8,8 +8,8 @@ export default defineConfig(({ mode }) => {
   // Prioridade: 
   // 1. Vercel System Env (process.env.API_KEY)
   // 2. Arquivo .env local (env.API_KEY)
-  // 3. Chave hardcoded fornecida pelo usuário (Fallback)
-  const apiKey = process.env.API_KEY || env.API_KEY || 'AIzaSyB5ZiNr_91sJVHTb3fxY7mVH3vbq1Xqs_8';
+  // A chave hardcoded foi removida por segurança.
+  const apiKey = process.env.API_KEY || env.API_KEY;
 
   return {
     plugins: [react()],
